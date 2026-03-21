@@ -102,7 +102,7 @@ app.post('/tts', async (req, res) => {
 
     const {
         text,
-        voice = 'marin',   // default to Marin — change here to switch global default
+        voice = 'nova',    // default voice — change here to switch global default
         model = 'tts-1'    // tts-1 or tts-1-hd
     } = req.body;
 
@@ -113,9 +113,9 @@ app.post('/tts', async (req, res) => {
 
     // Whitelist for safety
     const ALLOWED_VOICES = ['alloy','echo','fable','onyx','nova','shimmer',
-                            'marin','coral','sage','ash','ballad','verse'];
+                            'coral','sage','ash','ballad','verse'];
     const ALLOWED_MODELS = ['tts-1', 'tts-1-hd'];
-    const safeVoice = ALLOWED_VOICES.includes(voice) ? voice : 'marin';
+    const safeVoice = ALLOWED_VOICES.includes(voice) ? voice : 'nova';
     const safeModel = ALLOWED_MODELS.includes(model) ? model : 'tts-1';
 
     try {
