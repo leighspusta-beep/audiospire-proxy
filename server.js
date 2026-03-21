@@ -27,11 +27,21 @@ app.get('/', (req, res) => res.json({ status: 'AudioSpire AI Proxy online', tts:
 // /ai  — Anthropic Claude streaming endpoint (unchanged)
 // =============================================================================
 app.post('/ai', async (req, res) => {
-    const { messages, system } = req.body;
+    const { messages, system, model, max_tokens } = req.body;
     if (!messages || !Array.isArray(messages) || messages.length === 0)
         return res.status(400).json({ error: 'messages array is required' });
     if (JSON.stringify(messages).length > 32000)
         return res.status(413).json({ error: 'Conversation history too large' });
+
+    // Allow client to select model and token limit — whitelist for safety
+    const ALLOWED_MODELS = [
+        'claude-sonnet-4-20250514',
+        'claude-haiku-4-5-20251001',
+        'claude-opus-4-6'
+    ];
+    const safeModel   = ALLOWED_MODELS.includes(model) ? model : 'claude-sonnet-4-20250514';
+    const safeTokens  = (typeof max_tokens === 'number' && max_tokens > 0 && max_tokens <= 2048)
+                        ? max_tokens : 1024;
 
     try {
         const upstream = await fetch('https://api.anthropic.com/v1/messages', {
@@ -43,8 +53,8 @@ app.post('/ai', async (req, res) => {
                 'anthropic-beta':    'messages-2023-12-15'
             },
             body: JSON.stringify({
-                model:      'claude-sonnet-4-20250514',
-                max_tokens: 1024,
+                model:      safeModel,
+                max_tokens: safeTokens,
                 stream:     true,
                 system:     system || '',
                 messages
