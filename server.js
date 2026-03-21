@@ -1,7 +1,7 @@
-// AudioSpire™ AI Proxy Server — with ElevenLabs TTS
+// AudioSpire™ AI Proxy Server — Anthropic Claude + OpenAI TTS
 // Requirements: Node.js 18+
 // Install: npm install express cors
-// Run:     ANTHROPIC_API_KEY=your_key ELEVENLABS_API_KEY=your_key node server.js
+// Run:     ANTHROPIC_API_KEY=your_key OPENAI_API_KEY=your_key node server.js
 
 const express = require('express');
 const cors    = require('cors');
@@ -9,10 +9,10 @@ const cors    = require('cors');
 const app           = express();
 const PORT          = process.env.PORT || 3000;
 const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
-const ELEVEN_KEY    = process.env.ELEVENLABS_API_KEY;
+const OPENAI_KEY    = process.env.OPENAI_API_KEY;
 
 if (!ANTHROPIC_KEY) { console.error('❌  ANTHROPIC_API_KEY not set. Exiting.'); process.exit(1); }
-if (!ELEVEN_KEY)    { console.warn('⚠️   ELEVENLABS_API_KEY not set — /tts endpoint will not work.'); }
+if (!OPENAI_KEY)    { console.warn('⚠️   OPENAI_API_KEY not set — /tts endpoint will not work.'); }
 
 // ── CORS ─────────────────────────────────────────────────────────────────────
 // Lock this down to your actual domain(s) before going live, e.g.:
@@ -21,10 +21,14 @@ app.use(cors({ origin: '*', methods: ['POST', 'GET'], allowedHeaders: ['Content-
 app.use(express.json({ limit: '64kb' }));
 
 // ── HEALTH CHECK ─────────────────────────────────────────────────────────────
-app.get('/', (req, res) => res.json({ status: 'AudioSpire AI Proxy online', tts: !!ELEVEN_KEY }));
+app.get('/', (req, res) => res.json({
+    status:    'AudioSpire AI Proxy online',
+    anthropic: !!ANTHROPIC_KEY,
+    tts:       !!OPENAI_KEY
+}));
 
 // =============================================================================
-// /ai  — Anthropic Claude streaming endpoint (unchanged)
+// /ai  — Anthropic Claude streaming endpoint
 // =============================================================================
 app.post('/ai', async (req, res) => {
     const { messages, system, model, max_tokens } = req.body;
@@ -33,15 +37,15 @@ app.post('/ai', async (req, res) => {
     if (JSON.stringify(messages).length > 32000)
         return res.status(413).json({ error: 'Conversation history too large' });
 
-    // Allow client to select model and token limit — whitelist for safety
+    // Whitelist models for safety
     const ALLOWED_MODELS = [
         'claude-sonnet-4-20250514',
         'claude-haiku-4-5-20251001',
         'claude-opus-4-6'
     ];
-    const safeModel   = ALLOWED_MODELS.includes(model) ? model : 'claude-sonnet-4-20250514';
-    const safeTokens  = (typeof max_tokens === 'number' && max_tokens > 0 && max_tokens <= 2048)
-                        ? max_tokens : 1024;
+    const safeModel  = ALLOWED_MODELS.includes(model) ? model : 'claude-sonnet-4-20250514';
+    const safeTokens = (typeof max_tokens === 'number' && max_tokens > 0 && max_tokens <= 2048)
+                       ? max_tokens : 1024;
 
     try {
         const upstream = await fetch('https://api.anthropic.com/v1/messages', {
@@ -87,62 +91,59 @@ app.post('/ai', async (req, res) => {
 });
 
 // =============================================================================
-// /tts  — ElevenLabs text-to-speech streaming endpoint
+// /tts  — OpenAI text-to-speech endpoint
 //
-// POST body: { text, voiceId, modelId?, stability?, similarityBoost?, styleExaggeration? }
-// Returns:   audio/mpeg stream
+// POST body: { text, voice?, model? }
+// Returns:   audio/mpeg
 // =============================================================================
 app.post('/tts', async (req, res) => {
-    if (!ELEVEN_KEY)
-        return res.status(503).json({ error: 'ElevenLabs API key not configured on server' });
+    if (!OPENAI_KEY)
+        return res.status(503).json({ error: 'OpenAI API key not configured on server' });
 
     const {
         text,
-        voiceId,
-        modelId           = 'eleven_turbo_v2_5',
-        stability         = 0.45,
-        similarityBoost   = 0.82,
-        styleExaggeration = 0.35,
-        speakerBoost      = true
+        voice = 'marin',   // default to Marin — change here to switch global default
+        model = 'tts-1'    // tts-1 or tts-1-hd
     } = req.body;
 
     if (!text || !text.trim())
         return res.status(400).json({ error: 'text is required' });
-    if (!voiceId)
-        return res.status(400).json({ error: 'voiceId is required' });
-    if (text.length > 5000)
-        return res.status(413).json({ error: 'Text too long — max 5000 chars per request' });
+    if (text.length > 4096)
+        return res.status(413).json({ error: 'Text too long — max 4096 chars' });
+
+    // Whitelist for safety
+    const ALLOWED_VOICES = ['alloy','echo','fable','onyx','nova','shimmer',
+                            'marin','coral','sage','ash','ballad','verse'];
+    const ALLOWED_MODELS = ['tts-1', 'tts-1-hd'];
+    const safeVoice = ALLOWED_VOICES.includes(voice) ? voice : 'marin';
+    const safeModel = ALLOWED_MODELS.includes(model) ? model : 'tts-1';
 
     try {
-        const upstream = await fetch(
-            `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}/stream`, {
+        const upstream = await fetch('https://api.openai.com/v1/audio/speech', {
             method: 'POST',
             headers: {
-                'Content-Type': 'application/json',
-                'xi-api-key':   ELEVEN_KEY
+                'Content-Type':  'application/json',
+                'Authorization': `Bearer ${OPENAI_KEY}`
             },
             body: JSON.stringify({
-                text,
-                model_id: modelId,
-                voice_settings: {
-                    stability,
-                    similarity_boost:   similarityBoost,
-                    style:              styleExaggeration,
-                    use_speaker_boost:  speakerBoost
-                }
+                model:           safeModel,
+                voice:           safeVoice,
+                input:           text,
+                response_format: 'mp3'
             })
         });
 
         if (!upstream.ok) {
             const err = await upstream.json().catch(() => ({}));
             return res.status(upstream.status).json({
-                error: err.detail?.message || err.detail || 'ElevenLabs API error'
+                error: err.error?.message || 'OpenAI TTS error'
             });
         }
 
-        res.setHeader('Content-Type',       'audio/mpeg');
-        res.setHeader('Cache-Control',      'no-cache');
-        res.setHeader('Transfer-Encoding',  'chunked');
+        // Stream MP3 directly back to the dashboard
+        res.setHeader('Content-Type',      'audio/mpeg');
+        res.setHeader('Cache-Control',     'no-cache');
+        res.setHeader('Transfer-Encoding', 'chunked');
 
         const reader = upstream.body.getReader();
         const pump   = async () => {
@@ -160,33 +161,8 @@ app.post('/tts', async (req, res) => {
     }
 });
 
-// =============================================================================
-// /voices  — returns the account's ElevenLabs voice list for the dropdown
-// =============================================================================
-app.get('/voices', async (req, res) => {
-    if (!ELEVEN_KEY)
-        return res.status(503).json({ error: 'ElevenLabs API key not configured on server' });
-    try {
-        const upstream = await fetch('https://api.elevenlabs.io/v1/voices', {
-            headers: { 'xi-api-key': ELEVEN_KEY }
-        });
-        if (!upstream.ok)
-            return res.status(upstream.status).json({ error: 'Could not fetch voices' });
-        const data = await upstream.json();
-        const voices = (data.voices || []).map(v => ({
-            voice_id: v.voice_id,
-            name:     v.name,
-            category: v.category
-        }));
-        res.json({ voices });
-    } catch (err) {
-        console.error('Voices fetch error:', err.message);
-        res.status(500).json({ error: 'Could not fetch voices' });
-    }
-});
-
 app.listen(PORT, () => {
     console.log(`✅  AudioSpire AI Proxy running on port ${PORT}`);
-    console.log(`    Anthropic AI:    ${ANTHROPIC_KEY ? '✅  ready' : '❌  missing key'}`);
-    console.log(`    ElevenLabs TTS:  ${ELEVEN_KEY    ? '✅  ready' : '❌  ELEVENLABS_API_KEY missing'}`);
+    console.log(`    Anthropic AI:  ${ANTHROPIC_KEY ? '✅  ready' : '❌  missing key'}`);
+    console.log(`    OpenAI TTS:    ${OPENAI_KEY    ? '✅  ready' : '❌  OPENAI_API_KEY missing'}`);
 });
