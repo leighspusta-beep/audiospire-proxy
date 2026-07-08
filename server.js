@@ -39,11 +39,11 @@ app.post('/ai', async (req, res) => {
 
     // Whitelist models for safety
     const ALLOWED_MODELS = [
-        'claude-sonnet-4-20250514',
-        'claude-haiku-4-5-20251001',
-        'claude-opus-4-6'
+        'claude-sonnet-5',            // text (Seraphina) — current Sonnet, drop-in replacement for 4.6
+        'claude-haiku-4-5-20251001', // voice — unchanged
+        'claude-opus-4-8'            // current Opus (was retired opus-4-6); defensive — nothing routes here yet
     ];
-    const safeModel  = ALLOWED_MODELS.includes(model) ? model : 'claude-sonnet-4-20250514';
+    const safeModel  = ALLOWED_MODELS.includes(model) ? model : 'claude-sonnet-5';
     const safeTokens = (typeof max_tokens === 'number' && max_tokens > 0 && max_tokens <= 2048)
                        ? max_tokens : 1024;
 
@@ -166,3 +166,4 @@ app.listen(PORT, () => {
     console.log(`    Anthropic AI:  ${ANTHROPIC_KEY ? '✅  ready' : '❌  missing key'}`);
     console.log(`    OpenAI TTS:    ${OPENAI_KEY    ? '✅  ready' : '❌  OPENAI_API_KEY missing'}`);
 });
+
